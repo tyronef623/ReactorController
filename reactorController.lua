@@ -32,6 +32,8 @@ dofile("/usr/apis/touchpoint.lua")
 local reactorVersion, reactor
 local mon, monSide
 local sizex, sizey, dim, oo, offy
+local targetFuelLevel = 50000 -- 🌟 Default target level (in mB)
+local meBridge = peripheral.find("meBridge") -- 🌟 Finds your AE2 ME Bridge
 local btnOn, btnOff, invalidDim
 local minb, maxb
 local rod, rfLost
@@ -50,6 +52,8 @@ local averageWaste = 0
 local averageFuelTemp = 0
 local averageCaseTemp = 0
 local averageRfLost = 0
+local reactor
+local meBridge
 
 -- table of which graphs to draw
 local graphsToDraw = {}
@@ -60,6 +64,7 @@ local graphs =
     "Energy Buffer",
     "Control Level",
     "Temperatures",
+	"Fuel Level", -- 🌟 Added Fuel Level graph
 }
 
 -- marks the offsets for each graph position
@@ -290,23 +295,38 @@ local function toggleGraph(name)
 end
 
 local function addGraphButtons()
-    offy = oo - 14
+    -- Lock to the top row for large multi-block monitors
+    offy = 1
+
     for i,v in pairs(graphs) do
+        -- Neatly spaces all 4 buttons using a 4-block Y-increment
         addButt(v, function() toggleGraph(v) end, {20, 3},
-                dim + 7, offy + i * 3 - 1,
+                dim + 7, offy + (i - 1) * 4 + 2,
                 colors.red, colors.lime)
         if (graphsToDraw[v] ~= nil) then
             t:toggleButton(v, true)
         end
     end
+    
+    -- 🌟 Add target fuel control buttons at the bottom of the orange box
+    addButt("Fuel-", function() changeFuelTarget(-10000) end, {9, 3}, dim + 7, offy + 18, colors.gray, colors.lightGray)
+    addButt("Fuel+", function() changeFuelTarget(10000) end, {9, 3}, dim + 18, offy + 18, colors.gray, colors.lightGray)
 end
 
 local function drawGraphButtons()
-    drawBox({sizex - dim - 3, oo - offy - 1},
-            dim + 2, offy, colors.orange)
-    drawText(" Graph Controls ",
-            dim + 7, offy + 1,
-            colors.black, colors.orange)
+    -- Always use our global variable
+    offy = 1 
+    
+    -- Dynamic height so it stretches from top to just above your bottom UI
+    local dynamicHeight = oo - 2 
+    
+    drawBox({sizex - dim - 3, dynamicHeight}, dim + 2, offy, colors.orange)
+    drawText(" Graph Controls ", dim + 7, offy + 1, colors.black, colors.orange)
+end
+            
+    -- 🌟 Render the AE2 Target Fuel info text inside the box
+    drawText("AE2 Target Fuel:", dim + 7, offy + 22, colors.black, colors.orange)
+    drawText(string.format("%s mB", tostring(targetFuelLevel)), dim + 7, offy + 23, colors.blue, colors.orange)
 end
 
 local function drawEnergyBuffer(xoff)
@@ -408,6 +428,46 @@ local function drawTemperatures(xoff)
             colors.gray)
 end
 
+-- Helper function to change target fuel levels safely
+function changeFuelTarget(amount)
+    targetFuelLevel = math.max(0, targetFuelLevel + amount)
+    -- Cap it at reactor maximum capacity if known
+    if maxFuelCapacity and targetFuelLevel > maxFuelCapacity then
+        targetFuelLevel = maxFuelCapacity
+    end
+end
+
+local function drawFuelLevel(xoff)
+    local srf = sizey - 9
+    local off = xoff
+    drawBox({15, srf + 2}, off - 1, 4, colors.gray)
+    
+    -- Gather real stats from the Extreme Reactors API
+    local currentFuel = 0
+    local maxFuel = 100000
+    if reactor.getFuelStats then
+        local stats = reactor.getFuelStats()
+        currentFuel = stats.fuel or 0
+        maxFuel = stats.fuelCapacity or 100000
+        maxFuelCapacity = maxFuel -- Update global tracker
+    end
+    
+    local fuelPerc = (currentFuel / maxFuel) * 100
+    
+    drawFilledBox({13, srf}, off, 5, colors.lightGray, colors.lightGray)
+    
+    local fillHeight = math.floor((currentFuel / maxFuel) * srf)
+    fillHeight = math.max(0, math.min(srf, fillHeight))
+    
+    drawText("Fuel Level", off + 2, 4, colors.black, colors.orange)
+    if (fillHeight > 0) then
+        -- Render fuel as a vibrant yellow/green bar
+        drawFilledBox({13, fillHeight}, off, srf + 5 - fillHeight, colors.yellow, colors.yellow)
+    end
+    
+    drawText(string.format("%5.1f%%", fuelPerc), off + 3, 6, colors.black, colors.yellow)
+end
+
 local function drawGraph(name, offset)
     if (name == "Energy Buffer") then
         drawEnergyBuffer(offset)
@@ -415,6 +475,8 @@ local function drawGraph(name, offset)
         drawControlLevel(offset)
     elseif (name == "Temperatures") then
         drawTemperatures(offset)
+    elseif (name == "Fuel Level") then -- 🌟 Routes to your new graph
+        drawFuelLevel(offset)
     end
 end
 
@@ -534,14 +596,16 @@ end
 
 --Creates all the buttons and determines monitor size
 local function initMon()
-    monSide = getPeripheral("monitor")
+-- No 'local' here, because we are assigning to the variables defined above
+    reactor = peripheral.wrap("BigReactors-Reactor_3")
+    meBridge = peripheral.wrap("me_bridge_3")
+	monSide = getPeripheral("monitor")
     if (monSide == nil or monSide == "") then
         monSide = nil
         return
     end
 
     mon = peripheral.wrap(monSide)
-
     if mon == nil then
         monSide = nil
         return
@@ -550,18 +614,32 @@ local function initMon()
     resetMon()
     t = touchpoint.new(monSide)
     sizex, sizey = mon.getSize()
-    oo = sizey - 37
+    
+    -- 1. Establish core vertical tracking boundaries for the 8x5 monitor
+    -- We set 'oo' based on your total monitor height (sizey)
+    oo = sizey - 5 
+    
+    -- 2. Establish global 'offy' (the vertical start position of the orange box)
+    -- We lock it to row 1 so the box starts at the very top of your wall
+    offy = 1
+    
+    -- 3. Calculate dimension width (dim)
+    -- This ensures your buttons have enough horizontal room on a 57-wide screen
     dim = sizex - 33
-
     if (sizex == 36) then
         dim = -1
     end
+    
+    -- 4. Run initializations now that layout values are guaranteed to exist
+    -- We wrap in pcall to prevent the whole system from crashing if one part fails
     if (pcall(addGraphButtons)) then
         displayingGraphMenu = true
     else
+        -- If it fails, reset and try to recover
         t = touchpoint.new(monSide)
         displayingGraphMenu = false
     end
+    
     local rtn = pcall(addButtons)
     if (not rtn) then
         t = touchpoint.new(monSide)
@@ -829,6 +907,27 @@ local function startTimer(ticksToUpdate, callback)
     return fun
 end
 
+local function handleAE2Fueling()
+    -- Throttler: Only run every 2 seconds to keep server TPS healthy
+    if lastRun and (os.clock() - lastRun < 2) then return end
+    lastRun = os.clock()
+
+    if not meBridge or not reactor then return end
+    
+    local currentFuel = 0
+    if reactor.getFuelStats then
+        currentFuel = reactor.getFuelStats().fuel or 0
+    end
+    
+    -- Check if we are below the set point
+    if currentFuel < targetFuelLevel then
+        -- We want to export to the Reactor's port
+        -- Replace 'reactor' in the next line with the actual peripheral name 
+        -- if it's named something like 'reactor_0'
+        meBridge.exportItemToPeripheral({id = "alltheores:uranium_ingot", count = 16}, "reactor")
+    end
+end
+
 
 -- Main loop, handles all the events
 local function loop()
@@ -868,13 +967,16 @@ local function loop()
             hasClicked = true
         end
     end
-    while (true) do
+   while (true) do
         local event = (monSide == nil) and { os.pullEvent() } or { t:handleEvents() }
 
         updateStatsTick(event)
         redrawTick(event)
         handleResize(event)
         handleClick(event)
+        
+        -- 🌟 Call your AE2 logic here so it runs every loop cycle
+        handleAE2Fueling() 
     end
 end
 
