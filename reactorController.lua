@@ -905,23 +905,26 @@ local function startTimer(ticksToUpdate, callback)
     return fun
 end
 
+-- Add a global variable to track time
+local lastFuelCheck = 0
+
 local function handleAE2Fueling()
-    -- Use the direct call method. This bypasses 'wrapping' issues entirely.
-    -- First argument: the peripheral name
-    -- Second argument: the function name as a string
-    -- Subsequent arguments: the parameters for that function
+    -- Only run this check every 30 seconds (or change as needed)
+    if os.clock() - lastFuelCheck < 30 then 
+        return 
+    end
+    lastFuelCheck = os.clock()
     
     local itemFilter = {name = "alltheores:uranium_ingot", count = 16}
     local targetPort = "bigreactors:reactoraccessport_0"
     
+    -- The pcall prevents the crash if the peripheral is busy
     local success, result = pcall(function()
-        return peripheral.call("me_bridge_0", "exportItemToPeripheral", itemFilter, targetPort)
+        return peripheral.call("me_bridge_3", "exportItemToPeripheral", itemFilter, targetPort)
     end)
     
     if not success then
-        print("Error: " .. tostring(result))
-    else
-        print("Export status: " .. tostring(result))
+        print("Export error: " .. tostring(result))
     end
 end
 
