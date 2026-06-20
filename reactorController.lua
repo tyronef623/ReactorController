@@ -612,7 +612,10 @@ local function initMon()
     resetMon()
     t = touchpoint.new(monSide)
     sizex, sizey = mon.getSize()
-    
+	-- Cap the dimensions for the UI to prevent drawing errors
+    local uiWidth = math.min(sizex, 100) 
+    local uiHeight = math.min(sizey, 50)
+	
     -- 1. Establish core vertical tracking boundaries for the 8x5 monitor
     -- We set 'oo' based on your total monitor height (sizey)
     oo = sizey - 5 
@@ -623,7 +626,8 @@ local function initMon()
     
     -- 3. Calculate dimension width (dim)
     -- This ensures your buttons have enough horizontal room on a 57-wide screen
-    dim = sizex - 33
+	dim = uiWidth - 33
+    oo = uiHeight - 37
     if (sizex == 36) then
         dim = -1
     end
