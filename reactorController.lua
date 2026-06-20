@@ -335,8 +335,7 @@ local function drawEnergyBuffer(xoff)
     local poff = right and off + 15 or off - 6
 
     drawBox({15, srf + 2}, off - 1, 4, colors.gray)
-    local pwr = math.floor(getPercPower() / 100
-            * (srf))
+ local pwr = math.floor(getPercPower() / 100 * (srf))
     drawFilledBox({13, srf}, off, 5,
             colors.red, colors.red)
     local rndpw = rnd(getPercPower(), 2)
