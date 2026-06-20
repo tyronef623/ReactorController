@@ -906,33 +906,22 @@ local function startTimer(ticksToUpdate, callback)
 end
 
 local function handleAE2Fueling()
-    -- 1. Find the peripherals by their network names
-    local me = peripheral.find("meBridge")
+    -- Use the direct call method. This bypasses 'wrapping' issues entirely.
+    -- First argument: the peripheral name
+    -- Second argument: the function name as a string
+    -- Subsequent arguments: the parameters for that function
     
-    -- Ensure you are using the EXACT name from peripheral.getNames()
-    local reactorPortName = "bigreactors:reactoraccessport_0" 
-
-    if not me then 
-        print("ME Bridge not found on network!") 
-        return 
-    end
-
-    -- 2. Define the item precisely as Advanced Peripherals expects
-    local item = {
-        name = "alltheores:uranium_ingot", -- Use 'name' instead of 'id'
-        count = 16
-    }
-
-    -- 3. Perform the export
-    -- We use pcall to catch any 'attempt to call' errors
+    local itemFilter = {name = "alltheores:uranium_ingot", count = 16}
+    local targetPort = "bigreactors:reactoraccessport_0"
+    
     local success, result = pcall(function()
-        return me.exportItemToPeripheral(item, reactorPortName)
+        return peripheral.call("me_bridge_0", "exportItemToPeripheral", itemFilter, targetPort)
     end)
-
+    
     if not success then
-        print("Export failed: " .. tostring(result))
+        print("Error: " .. tostring(result))
     else
-        print("Export successful. Items moved: " .. tostring(result))
+        print("Export status: " .. tostring(result))
     end
 end
 
