@@ -595,27 +595,24 @@ end
 --Creates all the buttons and determines monitor size
 local function initMon()
     reactor = peripheral.wrap("BigReactors-Reactor_3")
-    meBridge = peripheral.wrap("me_bridge_0") -- Ensure this name matches exactly
-    monSide = getPeripheral("monitor")
+    meBridge = peripheral.wrap("me_bridge_3")
     
-    if not monSide or monSide == "" then return end
-    mon = peripheral.wrap(monSide)
+    local monSide = peripheral.find("monitor")
+    if not monSide then return end
     
+    mon = monSide
+    mon.setTextScale(0.5) -- Keep it high-res
     resetMon()
-    t = touchpoint.new(monSide)
+    t = touchpoint.new(peripheral.getName(mon))
     
-    -- FORCE THE SIZE: Ignore the dynamic calculation for now
-    sizex = 100
-    sizey = 50
-    dim = 60    -- Fixed width for UI
-    oo = 1      -- Fixed Y-offset
+    -- REMOVE THE CAP: Get the raw, massive dimensions
+    sizex, sizey = mon.getSize()
     
-    -- Force bypass the 'invalidDim' logic
-    invalidDim = false
+    -- Let the script calculate UI width based on the massive screen
+    dim = sizex - 33
+    oo = sizey - 37
     
-    -- Proceed directly to drawing
-    pcall(addGraphButtons)
-    pcall(addButtons)
+    print("Monitor initialized at full resolution: " .. sizex .. "x" .. sizey)
 end
 
 local function setRods(level)
