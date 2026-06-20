@@ -594,61 +594,28 @@ end
 
 --Creates all the buttons and determines monitor size
 local function initMon()
--- No 'local' here, because we are assigning to the variables defined above
     reactor = peripheral.wrap("BigReactors-Reactor_3")
-    meBridge = peripheral.wrap("me_bridge_3")
-	monSide = getPeripheral("monitor")
-    if (monSide == nil or monSide == "") then
-        monSide = nil
-        return
-    end
-
+    meBridge = peripheral.wrap("me_bridge_0") -- Ensure this name matches exactly
+    monSide = getPeripheral("monitor")
+    
+    if not monSide or monSide == "" then return end
     mon = peripheral.wrap(monSide)
-    if mon == nil then
-        monSide = nil
-        return
-    end
-
+    
     resetMon()
     t = touchpoint.new(monSide)
-    sizex, sizey = mon.getSize()
-	-- Cap the dimensions for the UI to prevent drawing errors
-    local uiWidth = math.min(sizex, 100) 
-    local uiHeight = math.min(sizey, 50)
-	
-    -- 1. Establish core vertical tracking boundaries for the 8x5 monitor
-    -- We set 'oo' based on your total monitor height (sizey)
-    oo = sizey - 5 
     
-    -- 2. Establish global 'offy' (the vertical start position of the orange box)
-    -- We lock it to row 1 so the box starts at the very top of your wall
-    offy = 1
+    -- FORCE THE SIZE: Ignore the dynamic calculation for now
+    sizex = 100
+    sizey = 50
+    dim = 60    -- Fixed width for UI
+    oo = 1      -- Fixed Y-offset
     
-    -- 3. Calculate dimension width (dim)
-    -- This ensures your buttons have enough horizontal room on a 57-wide screen
-	dim = uiWidth - 33
-    oo = uiHeight - 37
-    if (sizex == 36) then
-        dim = -1
-    end
+    -- Force bypass the 'invalidDim' logic
+    invalidDim = false
     
-    -- 4. Run initializations now that layout values are guaranteed to exist
-    -- We wrap in pcall to prevent the whole system from crashing if one part fails
-    if (pcall(addGraphButtons)) then
-        displayingGraphMenu = true
-    else
-        -- If it fails, reset and try to recover
-        t = touchpoint.new(monSide)
-        displayingGraphMenu = false
-    end
-    
-    local rtn = pcall(addButtons)
-    if (not rtn) then
-        t = touchpoint.new(monSide)
-        invalidDim = true
-    else
-        invalidDim = false
-    end
+    -- Proceed directly to drawing
+    pcall(addGraphButtons)
+    pcall(addButtons)
 end
 
 local function setRods(level)
