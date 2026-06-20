@@ -27,7 +27,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ]]
 
-dofile("/usr/apis/touchpoint.lua")
+dofile("touchpoint.lua")
 
 local reactorVersion, reactor
 local mon, monSide
