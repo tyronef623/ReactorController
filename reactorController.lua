@@ -906,27 +906,33 @@ local function startTimer(ticksToUpdate, callback)
 end
 
 local function handleAE2Fueling()
-    if lastRun and (os.clock() - lastRun < 2) then return end
-    lastRun = os.clock()
+    -- 1. Find the peripherals by their network names
+    local me = peripheral.find("meBridge")
+    
+    -- Ensure you are using the EXACT name from peripheral.getNames()
+    local reactorPortName = "bigreactors:reactoraccessport_0" 
 
-    -- Ensure we have the peripheral object
-    if not meBridge then return end
-    
-    local currentFuel = 0
-    if reactor.getFuelStats then
-        currentFuel = reactor.getFuelStats().fuel or 0
+    if not me then 
+        print("ME Bridge not found on network!") 
+        return 
     end
-    
-    if currentFuel < targetFuelLevel then
-        -- Use peripheral.call to explicitly trigger the method on the bridge
-        -- Change "meBridge_0" to match the name you found via getNames()
-        local success, result = pcall(function()
-            return peripheral.call("meBridge_0", "exportItemToPeripheral", {id = "alltheores:uranium_ingot", count = 16}, "reactor")
-        end)
-        
-        if not success then
-            print("Export Error: " .. tostring(result))
-        end
+
+    -- 2. Define the item precisely as Advanced Peripherals expects
+    local item = {
+        name = "alltheores:uranium_ingot", -- Use 'name' instead of 'id'
+        count = 16
+    }
+
+    -- 3. Perform the export
+    -- We use pcall to catch any 'attempt to call' errors
+    local success, result = pcall(function()
+        return me.exportItemToPeripheral(item, reactorPortName)
+    end)
+
+    if not success then
+        print("Export failed: " .. tostring(result))
+    else
+        print("Export successful. Items moved: " .. tostring(result))
     end
 end
 
