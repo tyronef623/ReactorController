@@ -322,7 +322,6 @@ local function drawGraphButtons()
     
     drawBox({sizex - dim - 3, dynamicHeight}, dim + 2, offy, colors.orange)
     drawText(" Graph Controls ", dim + 7, offy + 1, colors.black, colors.orange)
-end
             
     -- 🌟 Render the AE2 Target Fuel info text inside the box
     drawText("AE2 Target Fuel:", dim + 7, offy + 22, colors.black, colors.orange)
