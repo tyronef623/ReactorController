@@ -906,23 +906,27 @@ local function startTimer(ticksToUpdate, callback)
 end
 
 local function handleAE2Fueling()
-    -- Throttler: Only run every 2 seconds to keep server TPS healthy
     if lastRun and (os.clock() - lastRun < 2) then return end
     lastRun = os.clock()
 
-    if not meBridge or not reactor then return end
+    -- Ensure we have the peripheral object
+    if not meBridge then return end
     
     local currentFuel = 0
     if reactor.getFuelStats then
         currentFuel = reactor.getFuelStats().fuel or 0
     end
     
-    -- Check if we are below the set point
     if currentFuel < targetFuelLevel then
-        -- We want to export to the Reactor's port
-        -- Replace 'reactor' in the next line with the actual peripheral name 
-        -- if it's named something like 'reactor_0'
-        meBridge.exportItemToPeripheral({id = "alltheores:uranium_ingot", count = 16}, "reactor")
+        -- Use peripheral.call to explicitly trigger the method on the bridge
+        -- Change "meBridge_0" to match the name you found via getNames()
+        local success, result = pcall(function()
+            return peripheral.call("meBridge_0", "exportItemToPeripheral", {id = "alltheores:uranium_ingot", count = 16}, "reactor")
+        end)
+        
+        if not success then
+            print("Export Error: " .. tostring(result))
+        end
     end
 end
 
