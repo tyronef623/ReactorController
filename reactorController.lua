@@ -31,8 +31,12 @@ CUSTOM build notes (changes from DrunkenKas original v0.51):
   * Added a 4th graph: "Fuel Level" (reads reactor.getFuelStats()).
   * Added AE2 ME Bridge integration that auto-exports uranium ingots into
     the reactor's fuel access port when fuel runs low (handleAE2Fueling).
-  * Added Fuel+/Fuel- buttons on the Graph Controls panel to adjust the
-    AE2 target fuel level (targetFuelLevel), shown on that panel.
+  * Added Fuel+/Fuel- buttons and an AE2 target fuel level readout
+    (targetFuelLevel) inside the Reactor Controls box, right under the
+    buffer +10/-10 buttons.
+  * Graph Controls box is now top-aligned with the Reactor Graphs box
+    (both use yoff=1), and the Reactor Controls box is stacked directly
+    underneath Graph Controls instead of being positioned independently.
 
 Fixed bugs from the previous CUSTOM revision that were breaking the
 monitor display entirely:
@@ -240,6 +244,14 @@ local function addButtons()
                 colors.purple, colors.pink)
         addButt(" - 10 ", maxSub10, {8, 3}, dim + 19, 18 + oo,
                 colors.magenta, colors.pink)
+
+        -- 🌟 Fuel target adjustment, placed under the buffer +/-10 buttons
+        addButt("Fuel-", function() changeFuelTarget(-10000) end, {9, 3},
+                dim + 7, 25 + oo,
+                colors.gray, colors.lightGray)
+        addButt("Fuel+", function() changeFuelTarget(10000) end, {9, 3},
+                dim + 18, 25 + oo,
+                colors.gray, colors.lightGray)
     end
 end
 
@@ -336,11 +348,17 @@ local function toggleGraph(name)
     end
 end
 
--- 🌟 Graph Controls panel: original layout (offy = oo - 14) restored so it
--- correctly sits above the Reactor Controls box on any monitor size, with
--- the Fuel+/Fuel- buttons added underneath the graph toggle buttons.
+-- 🌟 Graph Controls panel height: title row + 3 rows per graph toggle
+-- button + a little padding. Kept as a function so addGraphButtons,
+-- drawGraphButtons, and initMon all agree on the same number.
+local function graphControlsHeight()
+    return #graphs * 3 + 4
+end
+
+-- 🌟 Graph Controls panel: offy is now fixed at 1 (set in initMon), the
+-- same yoff the Reactor Graphs box uses, so the two boxes top-align.
+-- The fuel target buttons have moved down into the Reactor Controls box.
 local function addGraphButtons()
-    offy = oo - 14
     for i,v in pairs(graphs) do
         addButt(v, function() toggleGraph(v) end, {20, 3},
                 dim + 7, offy + i * 3 - 1,
@@ -349,28 +367,14 @@ local function addGraphButtons()
             t:toggleButton(v, true)
         end
     end
-
-    -- 🌟 Target fuel control buttons, placed just below the graph toggles
-    addButt("Fuel-", function() changeFuelTarget(-10000) end, {9, 3},
-            dim + 7, offy + #graphs * 3 + 2,
-            colors.gray, colors.lightGray)
-    addButt("Fuel+", function() changeFuelTarget(10000) end, {9, 3},
-            dim + 18, offy + #graphs * 3 + 2,
-            colors.gray, colors.lightGray)
 end
 
 local function drawGraphButtons()
-    drawBox({sizex - dim - 3, oo - offy - 1},
+    drawBox({sizex - dim - 3, graphControlsHeight()},
             dim + 2, offy, colors.orange)
     drawText(" Graph Controls ",
             dim + 7, offy + 1,
             colors.black, colors.orange)
-
-    -- 🌟 Render the AE2 target fuel info text inside the box, just below
-    -- the Fuel+/Fuel- buttons
-    local fuelTextY = offy + #graphs * 3 + 6
-    drawText("AE2 Target Fuel:", dim + 7, fuelTextY, colors.black, colors.orange)
-    drawText(string.format("%d mB", targetFuelLevel), dim + 7, fuelTextY + 1, colors.orange, colors.black)
 end
 
 local function drawEnergyBuffer(xoff)
@@ -547,7 +551,7 @@ local function drawControls()
         return
     end
 
-    drawBox({sizex - dim - 3, 23}, dim + 2, oo,
+    drawBox({sizex - dim - 3, 29}, dim + 2, oo,
             colors.cyan)
     drawText(" Reactor Controls ", dim + 7, oo + 1,
             colors.black, colors.cyan)
@@ -569,6 +573,12 @@ local function drawControls()
     drawText("Reactor ".. (btnOn and "Online" or "Offline"),
             dim + 10, 3 + oo,
             colors.black, btnOn and colors.green or colors.red)
+
+    -- 🌟 AE2 target fuel level, placed under the buffer +/-10 buttons
+    drawText("Target Fuel Level", dim + 8, 23 + oo,
+            colors.black, colors.orange)
+    drawText(string.format("%d mB", targetFuelLevel), dim + 10, 24 + oo,
+            colors.black, colors.yellow)
 end
 
 local function drawStatistics()
@@ -653,8 +663,15 @@ local function initMon()
     resetMon()
     t = touchpoint.new(monSide)
     sizex, sizey = mon.getSize()
-    oo = sizey - 37
     dim = sizex - 33
+
+    -- 🌟 offy is the top of the Graph Controls box. Setting it to 1 makes
+    -- it top-align with the Reactor Graphs box (which also uses yoff=1).
+    -- oo (top of the Reactor Controls box) is then derived from it so
+    -- Reactor Controls stacks directly underneath Graph Controls instead
+    -- of being positioned from sizey independently.
+    offy = 1
+    oo = offy + graphControlsHeight()
 
     if (sizex == 36) then
         dim = -1
