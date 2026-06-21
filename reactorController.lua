@@ -37,6 +37,13 @@ CUSTOM build notes (changes from DrunkenKas original v0.51):
   * Graph Controls box is now top-aligned with the Reactor Graphs box
     (both use yoff=1), and the Reactor Controls box is stacked directly
     underneath Graph Controls instead of being positioned independently.
+  * Reactor Statistics now also shows Max Fuel capacity. fuelAmount and
+    maxFuelCapacity are polled once per tick in updateStats() (instead of
+    drawFuelLevel re-polling the reactor on every redraw), so both the
+    Statistics box and the Fuel Level graph stay in sync.
+  * Fuel Level graph now draws a red marker line across the bar showing
+    where the AE2 target fuel level sits, on top of the max-capacity
+    background and the current-fuel fill.
 
 Fixed bugs from the previous CUSTOM revision that were breaking the
 monitor display entirely:
@@ -89,7 +96,8 @@ local averageRfLost = 0
 
 -- 🌟 AE2 / Fuel Level additions
 local targetFuelLevel = 50000 -- Default AE2 target fuel level (in mB)
-local maxFuelCapacity -- populated once we read real fuel stats from the reactor
+local fuelAmount = 0 -- current fuel in the reactor (mB), refreshed in updateStats()
+local maxFuelCapacity = 1 -- max fuel capacity (mB), refreshed in updateStats(); starts at 1 to avoid divide-by-zero
 local meBridge = peripheral.find("meBridge") -- Finds your AE2 ME Bridge once, dynamically
 
 -- table of which graphs to draw
@@ -476,35 +484,36 @@ local function drawTemperatures(xoff)
             colors.gray)
 end
 
--- 🌟 Fuel Level graph: shows current reactor fuel (mB) as a fill bar
+-- 🌟 Fuel Level graph: full bar = max fuel capacity, yellow fill = current
+-- fuel on top of it, and a red marker line shows where the AE2 target
+-- fuel level sits relative to both. Data comes from updateStats() now,
+-- rather than re-polling the reactor on every redraw.
 local function drawFuelLevel(xoff)
     local srf = sizey - 9
     local off = xoff
     drawBox({15, srf + 2}, off - 1, 4, colors.gray)
 
-    -- Gather real stats from the Extreme Reactors API
-    local currentFuel = 0
-    local maxFuel = 100000
-    if reactor.getFuelStats then
-        local stats = reactor.getFuelStats()
-        currentFuel = stats.fuel or 0
-        maxFuel = stats.fuelCapacity or 100000
-        maxFuelCapacity = maxFuel -- Update global tracker
-    end
+    local maxFuel = math.max(maxFuelCapacity, 1) -- guard against divide-by-zero
+    local fuelPerc = (fuelAmount / maxFuel) * 100
 
-    local fuelPerc = (currentFuel / maxFuel) * 100
-
+    -- Background represents the reactor's max fuel capacity (0% to 100%)
     drawFilledBox({13, srf}, off, 5, colors.lightGray, colors.lightGray)
 
-    local fillHeight = math.floor((currentFuel / maxFuel) * srf)
+    -- Current fuel fill, drawn on top of the max-capacity background
+    local fillHeight = math.floor((fuelAmount / maxFuel) * srf)
     fillHeight = math.max(0, math.min(srf, fillHeight))
-
-    drawText("Fuel Level", off + 2, 4, colors.black, colors.orange)
     if (fillHeight > 0) then
-        -- Render fuel as a vibrant yellow bar
         drawFilledBox({13, fillHeight}, off, srf + 5 - fillHeight, colors.yellow, colors.yellow)
     end
 
+    -- Target fuel level marker line, drawn last so it's always visible
+    -- on top of either the background or the fill
+    local targetHeight = math.floor((targetFuelLevel / maxFuel) * srf)
+    targetHeight = math.max(0, math.min(srf, targetHeight))
+    local targetRow = srf + 5 - targetHeight
+    drawText(string.rep(" ", 13), off, targetRow, colors.red, colors.red)
+
+    drawText("Fuel Level", off + 2, 4, colors.black, colors.orange)
     drawText(string.format("%5.1f%%", fuelPerc), off + 3, 6, colors.black, colors.yellow)
 end
 
@@ -582,7 +591,7 @@ local function drawControls()
 end
 
 local function drawStatistics()
-    local oS = sizey - 13
+    local oS = sizey - 15
     drawBox({sizex - dim - 3, sizey - oS - 1}, dim + 2, oS,
             colors.blue)
     drawText(" Reactor Statistics ", dim + 7, oS + 1,
@@ -609,6 +618,11 @@ local function drawStatistics()
             ..string.format("%7d mB", waste),
             dim + 5, oS + 11,
             colors.black, colors.green)
+    -- 🌟 Max fuel capacity for the reactor
+    drawText("Max Fuel   : "
+            ..string.format("%7d mB", maxFuelCapacity),
+            dim + 5, oS + 13,
+            colors.black, colors.yellow)
 end
 
 --Draw a scene
@@ -814,6 +828,11 @@ local function updateStats()
         caseTemp = reactor.getCasingTemperature()
         -- Big Reactors doesn't give us a way to directly query RF capacity through CC APIs
         capacity = math.max(capacity, reactor.getEnergyStored)
+        -- 🌟 Fuel amount / capacity, if this Big Reactors version exposes them
+        local okAmt, amt = pcall(reactor.getFuelAmount)
+        local okMax, max = pcall(reactor.getFuelAmountMax)
+        if (okAmt) then fuelAmount = amt end
+        if (okMax) then maxFuelCapacity = max end
     elseif (reactorVersion == "Extreme Reactors") then
         local bat = reactor.getEnergyStats()
         local fuel = reactor.getFuelStats()
@@ -826,6 +845,9 @@ local function updateStats()
         waste = reactor.getWasteAmount()
         fuelTemp = reactor.getFuelTemperature()
         caseTemp = reactor.getCasingTemperature()
+        -- 🌟 Fuel amount / capacity, straight from the same getFuelStats() table
+        fuelAmount = fuel.fuel or fuelAmount
+        maxFuelCapacity = fuel.fuelCapacity or maxFuelCapacity
     elseif (reactorVersion == "Bigger Reactors") then
         storedThisTick = reactor.battery().stored()
         lastRFT = reactor.battery().producedLastTick()
@@ -835,6 +857,11 @@ local function updateStats()
         waste = reactor.fuelTank().waste()
         fuelTemp = reactor.fuelTemperature()
         caseTemp = reactor.casingTemperature()
+        -- 🌟 Fuel amount / capacity from the fuel tank peripheral
+        local okAmt, amt = pcall(function() return reactor.fuelTank().fuel() end)
+        local okMax, max = pcall(function() return reactor.fuelTank().capacity() end)
+        if (okAmt) then fuelAmount = amt end
+        if (okMax) then maxFuelCapacity = max end
     end
     rfLost = lastRFT + storedLastTick - storedThisTick
     -- Add the values to the arrays
