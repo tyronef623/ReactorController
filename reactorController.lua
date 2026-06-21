@@ -363,6 +363,15 @@ local function graphControlsHeight()
     return #graphs * 3 + 4
 end
 
+-- 🌟 Right-column layout constants. Graph Controls, Reactor Controls, and
+-- Reactor Statistics are stacked top-to-bottom, each separated by the
+-- same CONTROL_BOX_GAP, so the blank space between them is even. These
+-- are shared by initMon() (which positions the boxes) and drawControls()/
+-- drawStatistics() (which need to know their own height).
+local CONTROL_BOX_GAP = 2
+local REACTOR_CONTROLS_HEIGHT = 29
+local REACTOR_STATS_HEIGHT = 14
+
 -- 🌟 Graph Controls panel: offy is now fixed at 1 (set in initMon), the
 -- same yoff the Reactor Graphs box uses, so the two boxes top-align.
 -- The fuel target buttons have moved down into the Reactor Controls box.
@@ -484,10 +493,10 @@ local function drawTemperatures(xoff)
             colors.gray)
 end
 
--- 🌟 Fuel Level graph: full bar = max fuel capacity, yellow fill = current
--- fuel on top of it, and a red marker line shows where the AE2 target
--- fuel level sits relative to both. Data comes from updateStats() now,
--- rather than re-polling the reactor on every redraw.
+-- 🌟 Fuel Level graph: full bar = max fuel capacity (orange background),
+-- blue fill = current fuel on top of it, and a red marker line shows
+-- where the AE2 target fuel level sits relative to both. Data comes from
+-- updateStats() now, rather than re-polling the reactor on every redraw.
 local function drawFuelLevel(xoff)
     local srf = sizey - 9
     local off = xoff
@@ -497,13 +506,13 @@ local function drawFuelLevel(xoff)
     local fuelPerc = (fuelAmount / maxFuel) * 100
 
     -- Background represents the reactor's max fuel capacity (0% to 100%)
-    drawFilledBox({13, srf}, off, 5, colors.lightGray, colors.lightGray)
+    drawFilledBox({13, srf}, off, 5, colors.orange, colors.orange)
 
     -- Current fuel fill, drawn on top of the max-capacity background
     local fillHeight = math.floor((fuelAmount / maxFuel) * srf)
     fillHeight = math.max(0, math.min(srf, fillHeight))
     if (fillHeight > 0) then
-        drawFilledBox({13, fillHeight}, off, srf + 5 - fillHeight, colors.yellow, colors.yellow)
+        drawFilledBox({13, fillHeight}, off, srf + 5 - fillHeight, colors.blue, colors.blue)
     end
 
     -- Target fuel level marker line, drawn last so it's always visible
@@ -514,7 +523,7 @@ local function drawFuelLevel(xoff)
     drawText(string.rep(" ", 13), off, targetRow, colors.red, colors.red)
 
     drawText("Fuel Level", off + 2, 4, colors.black, colors.orange)
-    drawText(string.format("%5.1f%%", fuelPerc), off + 3, 6, colors.black, colors.yellow)
+    drawText(string.format("%5.1f%%", fuelPerc), off + 3, 6, colors.black, colors.blue)
 end
 
 local function drawGraph(name, offset)
@@ -560,7 +569,7 @@ local function drawControls()
         return
     end
 
-    drawBox({sizex - dim - 3, 29}, dim + 2, oo,
+    drawBox({sizex - dim - 3, REACTOR_CONTROLS_HEIGHT}, dim + 2, oo,
             colors.cyan)
     drawText(" Reactor Controls ", dim + 7, oo + 1,
             colors.black, colors.cyan)
@@ -591,37 +600,39 @@ local function drawControls()
 end
 
 local function drawStatistics()
-    local oS = sizey - 15
-    drawBox({sizex - dim - 3, sizey - oS - 1}, dim + 2, oS,
+    -- 🌟 Chained off Reactor Controls with the same CONTROL_BOX_GAP used
+    -- between Graph Controls and Reactor Controls, for even spacing.
+    local statsTop = oo + REACTOR_CONTROLS_HEIGHT + CONTROL_BOX_GAP
+    drawBox({sizex - dim - 3, REACTOR_STATS_HEIGHT}, dim + 2, statsTop,
             colors.blue)
-    drawText(" Reactor Statistics ", dim + 7, oS + 1,
+    drawText(" Reactor Statistics ", dim + 7, statsTop + 1,
             colors.black, colors.blue)
 
     --statistics
     drawText("Generating : "
-            ..format(averageLastRFT).."RF/t", dim + 5, oS + 3,
+            ..format(averageLastRFT).."RF/t", dim + 5, statsTop + 3,
             colors.black, colors.green)
     drawText("RF Drain   "
             ..(averageStoredThisTick <= averageLastRFT and "> " or ": ")
             ..format(averageRfLost)
-            .."RF/t", dim + 5, oS + 5,
+            .."RF/t", dim + 5, statsTop + 5,
             colors.black, colors.red)
     drawText("Efficiency : "
             ..format(getEfficiency()).."RF/B",
-            dim + 5, oS + 7,
+            dim + 5, statsTop + 7,
             colors.black, colors.green)
     drawText("Fuel Usage : "
             ..format(averageFuelUsage)
-            .."B/t", dim + 5, oS + 9,
+            .."B/t", dim + 5, statsTop + 9,
             colors.black, colors.green)
     drawText("Waste      : "
             ..string.format("%7d mB", waste),
-            dim + 5, oS + 11,
+            dim + 5, statsTop + 11,
             colors.black, colors.green)
     -- 🌟 Max fuel capacity for the reactor
     drawText("Max Fuel   : "
             ..string.format("%7d mB", maxFuelCapacity),
-            dim + 5, oS + 13,
+            dim + 5, statsTop + 13,
             colors.black, colors.yellow)
 end
 
@@ -681,11 +692,12 @@ local function initMon()
 
     -- 🌟 offy is the top of the Graph Controls box. Setting it to 1 makes
     -- it top-align with the Reactor Graphs box (which also uses yoff=1).
-    -- oo (top of the Reactor Controls box) is then derived from it so
-    -- Reactor Controls stacks directly underneath Graph Controls instead
-    -- of being positioned from sizey independently.
+    -- oo (top of the Reactor Controls box) is then derived from it, with
+    -- a CONTROL_BOX_GAP blank rows of spacing, so Reactor Controls sits
+    -- just below Graph Controls instead of being positioned from sizey
+    -- independently (which is what caused the uneven spacing before).
     offy = 1
-    oo = offy + graphControlsHeight()
+    oo = offy + graphControlsHeight() + CONTROL_BOX_GAP
 
     if (sizex == 36) then
         dim = -1
@@ -845,9 +857,15 @@ local function updateStats()
         waste = reactor.getWasteAmount()
         fuelTemp = reactor.getFuelTemperature()
         caseTemp = reactor.getCasingTemperature()
-        -- 🌟 Fuel amount / capacity, straight from the same getFuelStats() table
-        fuelAmount = fuel.fuel or fuelAmount
-        maxFuelCapacity = fuel.fuelCapacity or maxFuelCapacity
+        -- 🌟 Fuel amount / capacity: getFuelStats() doesn't expose these as
+        -- .fuel/.fuelCapacity on this peripheral (that's what caused the
+        -- Fuel Level graph to read 0.0% forever). getFuelAmount() /
+        -- getFuelAmountMax() are the actual direct getters, so use those,
+        -- with the table fields only as a last-resort fallback.
+        local okAmt, amt = pcall(reactor.getFuelAmount)
+        local okMax, max = pcall(reactor.getFuelAmountMax)
+        fuelAmount = (okAmt and amt) or fuel.fuel or fuelAmount
+        maxFuelCapacity = (okMax and max) or fuel.fuelCapacity or maxFuelCapacity
     elseif (reactorVersion == "Bigger Reactors") then
         storedThisTick = reactor.battery().stored()
         lastRFT = reactor.battery().producedLastTick()
