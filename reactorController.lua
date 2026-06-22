@@ -813,6 +813,7 @@ local function saveToConfig()
         btnOn = btnOn,
         graphsToDraw = graphsToDraw,
         XOffs = XOffs,
+        targetFuelLevel = targetFuelLevel, -- 🌟 persist the AE2 target fuel level
     }
     local serialized = textutils.serialize(configs)
     file.write(serialized)
@@ -846,17 +847,27 @@ local function updateStats()
         if (okAmt) then fuelAmount = amt end
         if (okMax) then maxFuelCapacity = max end
     elseif (reactorVersion == "Extreme Reactors") then
+        -- getEnergyStats() and getFuelStats() return nil when the reactor is
+        -- offline with no fuel. Guard every access so a dry reactor doesn't
+        -- crash the whole controller.
         local bat = reactor.getEnergyStats()
         local fuel = reactor.getFuelStats()
 
-        storedThisTick = bat.energyStored
-        lastRFT = bat.energyProducedLastTick
-        capacity = bat.energyCapacity
+        if bat ~= nil then
+            storedThisTick = bat.energyStored
+            lastRFT = bat.energyProducedLastTick
+            capacity = bat.energyCapacity
+        end
         rod = reactor.getControlRodLevel(0)
-        fuelUsage = fuel.fuelConsumedLastTick / 1000
-        waste = reactor.getWasteAmount()
-        fuelTemp = reactor.getFuelTemperature()
-        caseTemp = reactor.getCasingTemperature()
+        if fuel ~= nil then
+            fuelUsage = fuel.fuelConsumedLastTick / 1000
+        end
+        local okWaste, wasteVal = pcall(reactor.getWasteAmount)
+        if okWaste then waste = wasteVal end
+        local okFT, ft = pcall(reactor.getFuelTemperature)
+        if okFT then fuelTemp = ft end
+        local okCT, ct = pcall(reactor.getCasingTemperature)
+        if okCT then caseTemp = ct end
         -- 🌟 Fuel amount / capacity: getFuelStats() doesn't expose these as
         -- .fuel/.fuelCapacity on this peripheral (that's what caused the
         -- Fuel Level graph to read 0.0% forever). getFuelAmount() /
@@ -864,8 +875,8 @@ local function updateStats()
         -- with the table fields only as a last-resort fallback.
         local okAmt, amt = pcall(reactor.getFuelAmount)
         local okMax, max = pcall(reactor.getFuelAmountMax)
-        fuelAmount = (okAmt and amt) or fuel.fuel or fuelAmount
-        maxFuelCapacity = (okMax and max) or fuel.fuelCapacity or maxFuelCapacity
+        fuelAmount = (okAmt and amt) or (fuel and fuel.fuel) or fuelAmount
+        maxFuelCapacity = (okMax and max) or (fuel and fuel.fuelCapacity) or maxFuelCapacity
     elseif (reactorVersion == "Bigger Reactors") then
         storedThisTick = reactor.battery().stored()
         lastRFT = reactor.battery().producedLastTick()
@@ -933,6 +944,9 @@ local function loadFromConfig()
         btnOn = deserialized.btnOn
         graphsToDraw = deserialized.graphsToDraw
         XOffs = deserialized.XOffs
+        -- 🌟 Fall back to the default if loading an older config that
+        -- was saved before targetFuelLevel was added to the file.
+        targetFuelLevel = deserialized.targetFuelLevel or targetFuelLevel
     elseif (legacyConfigExists) then
         local file = fs.open(tag..".txt", "r")
         local calibrated = file.readLine() == "true"
@@ -997,29 +1011,50 @@ end
 -- 🌟 AE2 auto-fueling: every ~30 seconds, ask the ME Bridge to export
 -- uranium ingots into the reactor's fuel access port if it's connected.
 local lastFuelCheck = 0
+local FUEL_CHECK_INTERVAL = 10   -- check every 10 seconds
+local FUEL_CRITICAL_THRESHOLD = 0.25 -- export immediately if fuel < 25% of target
 
 local function handleAE2Fueling()
-    -- Only run this check every 30 seconds (or change as needed)
-    if os.clock() - lastFuelCheck < 30 then
+    if meBridge == nil then return end
+
+    local now = os.clock()
+    local fuelIsLow = fuelAmount < targetFuelLevel
+    local fuelIsCritical = fuelAmount < (targetFuelLevel * FUEL_CRITICAL_THRESHOLD)
+
+    -- Always export immediately on critical, otherwise throttle to interval
+    if not fuelIsCritical and (now - lastFuelCheck < FUEL_CHECK_INTERVAL) then
         return
     end
-    lastFuelCheck = os.clock()
+    lastFuelCheck = now
 
-    if meBridge == nil then
-        -- ME Bridge not found on the network, nothing to do
-        return
-    end
+    -- Only export if we're actually below target — no point waking AE2 otherwise
+    if not fuelIsLow then return end
 
-    local itemFilter = {name = "alltheores:uranium_ingot", count = 16}
-    local targetPort = "bigreactors:reactoraccessport_0" -- adjust if your port name differs
+    -- How many ingots do we need? Each ingot = 1000 mB of fuel (Extreme Reactors).
+    -- Request enough to fill to target, capped at 64 per export to avoid
+    -- flooding the access port.
+    local deficit = targetFuelLevel - fuelAmount
+    local ingotsNeeded = math.ceil(deficit / 1000)
+    local exportCount = math.min(ingotsNeeded, 64)
 
-    -- The pcall prevents a crash if the peripheral is busy or the call fails
+    -- ⚠️  ADJUST THESE TO MATCH YOUR SETUP:
+    --   itemName  = the registry name of your fuel item (check JEI with F3+H)
+    --   targetPort = the peripheral name of your Reactor Access Port
+    --               (run `peripheral.getNames()` in a CC terminal to find it)
+    local itemName  = "bigreactors:yellorium_ingot"   -- default ER fuel; change if using uranium etc.
+    local targetPort = "bigreactors:reactoraccessport_0"
+
+    local itemFilter = { name = itemName, count = exportCount }
+
     local success, result = pcall(function()
         return meBridge.exportItemToPeripheral(itemFilter, targetPort)
     end)
 
     if not success then
-        print("Export error: " .. tostring(result))
+        print("[AE2 Fuel] Export error: " .. tostring(result))
+    elseif result ~= nil and result > 0 then
+        print(string.format("[AE2 Fuel] Exported %d ingot(s) (fuel %d/%d mB)",
+                result, fuelAmount, targetFuelLevel))
     end
 end
 
