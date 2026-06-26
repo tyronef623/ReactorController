@@ -1068,10 +1068,10 @@ local function detectMEBridge()
                 print("  " .. m)
             end
             -- Check for the export method under known names
-            if found.exportItemToPeripheral then
-                print("[AE2] exportItemToPeripheral: OK")
-            elseif found.exportItem then
-                print("[AE2] exportItem found (will use instead of exportItemToPeripheral)")
+            if found.exportItem then
+                print("[AE2] exportItem: OK (AP 0.7/0.8 unified method)")
+            elseif found.exportItemToPeripheral then
+                print("[AE2] exportItemToPeripheral: OK (legacy AP 0.7 for 1.20.1)")
             else
                 print("[AE2] WARNING: no export method found — check list above")
             end
@@ -1083,6 +1083,29 @@ local function detectMEBridge()
     print("[AE2] Expected one of: " .. table.concat(ME_BRIDGE_TYPES, ", "))
     print("[AE2] Auto-fueling will be DISABLED.")
     return nil
+end
+
+-- Prints a startup check for the Reactor Access Port so the user can
+-- verify the peripheral name before the first fueling attempt.
+local function checkAccessPort()
+    print("[AE2] Checking Reactor Access Port: '" .. AE2_ACCESS_PORT .. "'")
+    if peripheral.isPresent(AE2_ACCESS_PORT) then
+        print("[AE2] Access port found: OK")
+    else
+        print("[AE2] WARNING: Access port NOT found!")
+        print("[AE2] Peripherals with 'access' or 'reactor' in the name:")
+        local found = false
+        for _, name in ipairs(peripheral.getNames()) do
+            local lower = string.lower(name)
+            if string.find(lower, "access") or string.find(lower, "reactor") then
+                print("  " .. name .. "  [" .. peripheral.getType(name) .. "]")
+                found = true
+            end
+        end
+        if not found then
+            print("  (none found — check AE2_ACCESS_PORT in the script)")
+        end
+    end
 end
 
 local function handleAE2Fueling()
@@ -1118,13 +1141,13 @@ local function handleAE2Fueling()
 
     local itemFilter = { name = AE2_FUEL_ITEM, count = exportCount }
     local success, result = pcall(function()
-        -- Advanced Peripherals uses different method names across versions.
-        -- Try the two known names and use whichever exists.
-        if meBridge.exportItemToPeripheral then
-            return meBridge.exportItemToPeripheral(itemFilter, AE2_ACCESS_PORT)
-        elseif meBridge.exportItem then
-            -- Some AP versions use exportItem(filter, direction/peripheralName)
+        -- AP 0.7 (1.21.1+) and 0.8 use exportItem(filter, target) where
+        -- target can be either a direction or a peripheral name.
+        -- exportItemToPeripheral is the legacy name for 0.7 on 1.20.1 and older.
+        if meBridge.exportItem then
             return meBridge.exportItem(itemFilter, AE2_ACCESS_PORT)
+        elseif meBridge.exportItemToPeripheral then
+            return meBridge.exportItemToPeripheral(itemFilter, AE2_ACCESS_PORT)
         else
             error("No export method found on ME Bridge. Check startup log for method list.")
         end
@@ -1242,6 +1265,7 @@ local function main()
     -- 🌟 Detect the ME Bridge with full diagnostics before anything else
     -- so the startup log shows exactly what was found.
     meBridge = detectMEBridge()
+    checkAccessPort()
 
     print("Loading config...")
     loadFromConfig()
