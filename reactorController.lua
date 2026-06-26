@@ -1021,7 +1021,7 @@ local FUEL_CRITICAL_PCT   = 0.25  -- skip throttle when fuel < 25% of target
 --             Enable F3+H in-game, then hover the ingot in JEI to see it.
 -- accessPort: the peripheral name of your Reactor Access Port.
 --             Run  peripheral.getNames()  in a CC terminal to find it.
-local AE2_FUEL_ITEM   = "bigreactors:yellorium_ingot"
+local AE2_FUEL_ITEM   = "alltheores:uranium_ingot"
 local AE2_ACCESS_PORT = "bigreactors:reactoraccessport_0"
 
 -- Advanced Peripherals registers the ME Bridge under these type strings
@@ -1055,12 +1055,25 @@ local function detectMEBridge()
             end
             print(string.format("[AE2] ME Bridge found: '%s' (type '%s')",
                     foundName, typeName))
-            -- Verify exportItemToPeripheral exists on this bridge
-            if found.exportItemToPeripheral == nil then
-                print("[AE2] WARNING: exportItemToPeripheral not found on this bridge.")
-                print("[AE2] Check your Advanced Peripherals version.")
-            else
+            -- Dump every method the bridge exposes so we know the exact name
+            print("[AE2] Available ME Bridge methods:")
+            local methods = {}
+            for k, v in pairs(found) do
+                if type(v) == "function" then
+                    table.insert(methods, k)
+                end
+            end
+            table.sort(methods)
+            for _, m in ipairs(methods) do
+                print("  " .. m)
+            end
+            -- Check for the export method under known names
+            if found.exportItemToPeripheral then
                 print("[AE2] exportItemToPeripheral: OK")
+            elseif found.exportItem then
+                print("[AE2] exportItem found (will use instead of exportItemToPeripheral)")
+            else
+                print("[AE2] WARNING: no export method found — check list above")
             end
             return found
         end
@@ -1105,7 +1118,16 @@ local function handleAE2Fueling()
 
     local itemFilter = { name = AE2_FUEL_ITEM, count = exportCount }
     local success, result = pcall(function()
-        return meBridge.exportItemToPeripheral(itemFilter, AE2_ACCESS_PORT)
+        -- Advanced Peripherals uses different method names across versions.
+        -- Try the two known names and use whichever exists.
+        if meBridge.exportItemToPeripheral then
+            return meBridge.exportItemToPeripheral(itemFilter, AE2_ACCESS_PORT)
+        elseif meBridge.exportItem then
+            -- Some AP versions use exportItem(filter, direction/peripheralName)
+            return meBridge.exportItem(itemFilter, AE2_ACCESS_PORT)
+        else
+            error("No export method found on ME Bridge. Check startup log for method list.")
+        end
     end)
 
     if not success then
