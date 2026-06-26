@@ -98,7 +98,7 @@ local averageRfLost = 0
 local targetFuelLevel = 50000 -- Default AE2 target fuel level (in mB)
 local fuelAmount = 0 -- current fuel in the reactor (mB), refreshed in updateStats()
 local maxFuelCapacity = 1 -- max fuel capacity (mB), refreshed in updateStats(); starts at 1 to avoid divide-by-zero
-local meBridge = peripheral.find("meBridge") -- Finds your AE2 ME Bridge once, dynamically
+local meBridge = nil  -- detected in main() with full diagnostics
 
 -- table of which graphs to draw
 local graphsToDraw = {}
@@ -1008,53 +1008,116 @@ local function startTimer(ticksToUpdate, callback)
     return fun
 end
 
--- 🌟 AE2 auto-fueling: every ~30 seconds, ask the ME Bridge to export
--- uranium ingots into the reactor's fuel access port if it's connected.
-local lastFuelCheck = 0
-local FUEL_CHECK_INTERVAL = 10   -- check every 10 seconds
-local FUEL_CRITICAL_THRESHOLD = 0.25 -- export immediately if fuel < 25% of target
+-- ============================================================
+-- 🌟 AE2 AUTO-FUELING
+-- ============================================================
+
+local lastFuelCheck       = 0
+local FUEL_CHECK_INTERVAL = 10    -- normal check interval (seconds)
+local FUEL_CRITICAL_PCT   = 0.25  -- skip throttle when fuel < 25% of target
+
+-- ⚠️  SET THESE TWO VALUES TO MATCH YOUR SETUP.
+-- itemName  : the registry name of your fuel item.
+--             Enable F3+H in-game, then hover the ingot in JEI to see it.
+-- accessPort: the peripheral name of your Reactor Access Port.
+--             Run  peripheral.getNames()  in a CC terminal to find it.
+local AE2_FUEL_ITEM   = "bigreactors:yellorium_ingot"
+local AE2_ACCESS_PORT = "bigreactors:reactoraccessport_0"
+
+-- Advanced Peripherals registers the ME Bridge under these type strings
+-- depending on version. We try them in order and use the first one found.
+local ME_BRIDGE_TYPES = { "meBridge", "me_bridge", "MEBridge" }
+
+-- Detects the ME Bridge and prints a full diagnostic so you can see
+-- exactly what was found (or why it wasn't).  Called once from main().
+local function detectMEBridge()
+    print("[AE2] Scanning for ME Bridge...")
+    print("[AE2] All peripherals on network:")
+    local names = peripheral.getNames()
+    if #names == 0 then
+        print("  (none found)")
+    else
+        for _, name in ipairs(names) do
+            print(string.format("  %s  [%s]", name, peripheral.getType(name)))
+        end
+    end
+
+    for _, typeName in ipairs(ME_BRIDGE_TYPES) do
+        local found = peripheral.find(typeName)
+        if found ~= nil then
+            -- peripheral.find returns the object; get its name for logging
+            local foundName = ""
+            for _, n in ipairs(names) do
+                if peripheral.getType(n) == typeName then
+                    foundName = n
+                    break
+                end
+            end
+            print(string.format("[AE2] ME Bridge found: '%s' (type '%s')",
+                    foundName, typeName))
+            -- Verify exportItemToPeripheral exists on this bridge
+            if found.exportItemToPeripheral == nil then
+                print("[AE2] WARNING: exportItemToPeripheral not found on this bridge.")
+                print("[AE2] Check your Advanced Peripherals version.")
+            else
+                print("[AE2] exportItemToPeripheral: OK")
+            end
+            return found
+        end
+    end
+
+    print("[AE2] WARNING: No ME Bridge found under any known type name.")
+    print("[AE2] Expected one of: " .. table.concat(ME_BRIDGE_TYPES, ", "))
+    print("[AE2] Auto-fueling will be DISABLED.")
+    return nil
+end
 
 local function handleAE2Fueling()
     if meBridge == nil then return end
 
     local now = os.clock()
-    local fuelIsLow = fuelAmount < targetFuelLevel
-    local fuelIsCritical = fuelAmount < (targetFuelLevel * FUEL_CRITICAL_THRESHOLD)
+    local fuelIsLow      = fuelAmount < targetFuelLevel
+    local fuelIsCritical = fuelAmount < (targetFuelLevel * FUEL_CRITICAL_PCT)
 
-    -- Always export immediately on critical, otherwise throttle to interval
+    -- Throttle normal checks; bypass throttle when critically low
     if not fuelIsCritical and (now - lastFuelCheck < FUEL_CHECK_INTERVAL) then
         return
     end
     lastFuelCheck = now
 
-    -- Only export if we're actually below target — no point waking AE2 otherwise
     if not fuelIsLow then return end
 
-    -- How many ingots do we need? Each ingot = 1000 mB of fuel (Extreme Reactors).
-    -- Request enough to fill to target, capped at 64 per export to avoid
-    -- flooding the access port.
-    local deficit = targetFuelLevel - fuelAmount
+    -- Calculate how many ingots to request (1 ingot = 1000 mB in Extreme Reactors)
+    local deficit      = targetFuelLevel - fuelAmount
     local ingotsNeeded = math.ceil(deficit / 1000)
-    local exportCount = math.min(ingotsNeeded, 64)
+    local exportCount  = math.min(ingotsNeeded, 64)
 
-    -- ⚠️  ADJUST THESE TO MATCH YOUR SETUP:
-    --   itemName  = the registry name of your fuel item (check JEI with F3+H)
-    --   targetPort = the peripheral name of your Reactor Access Port
-    --               (run `peripheral.getNames()` in a CC terminal to find it)
-    local itemName  = "bigreactors:yellorium_ingot"   -- default ER fuel; change if using uranium etc.
-    local targetPort = "bigreactors:reactoraccessport_0"
+    print(string.format(
+        "[AE2 Fuel] Fuel low (%d/%d mB). Requesting %d ingot(s) of '%s' -> '%s'",
+        fuelAmount, targetFuelLevel, exportCount, AE2_FUEL_ITEM, AE2_ACCESS_PORT))
 
-    local itemFilter = { name = itemName, count = exportCount }
+    -- First verify the access port is still present
+    if not peripheral.isPresent(AE2_ACCESS_PORT) then
+        print("[AE2 Fuel] ERROR: Access port '" .. AE2_ACCESS_PORT ..
+                "' not found. Check AE2_ACCESS_PORT in the script.")
+        return
+    end
 
+    local itemFilter = { name = AE2_FUEL_ITEM, count = exportCount }
     local success, result = pcall(function()
-        return meBridge.exportItemToPeripheral(itemFilter, targetPort)
+        return meBridge.exportItemToPeripheral(itemFilter, AE2_ACCESS_PORT)
     end)
 
     if not success then
-        print("[AE2 Fuel] Export error: " .. tostring(result))
-    elseif result ~= nil and result > 0 then
-        print(string.format("[AE2 Fuel] Exported %d ingot(s) (fuel %d/%d mB)",
-                result, fuelAmount, targetFuelLevel))
+        print("[AE2 Fuel] Export call failed: " .. tostring(result))
+        print("[AE2 Fuel] Check AE2_FUEL_ITEM and AE2_ACCESS_PORT at the top of the script.")
+    elseif result == nil then
+        print("[AE2 Fuel] Export returned nil - item may not be in the ME system,")
+        print("[AE2 Fuel] or '" .. AE2_FUEL_ITEM .. "' is the wrong item name.")
+    elseif result == 0 then
+        print("[AE2 Fuel] Export returned 0 - ME system may be empty or offline.")
+    else
+        print(string.format("[AE2 Fuel] Exported %d ingot(s) successfully.", result))
     end
 end
 
@@ -1154,9 +1217,9 @@ local function main()
     
     print("Reactor detected! Proceeding with initialization ")
 
-    if (meBridge == nil) then
-        print("Warning: AE2 ME Bridge not detected. Auto-fueling disabled.")
-    end
+    -- 🌟 Detect the ME Bridge with full diagnostics before anything else
+    -- so the startup log shows exactly what was found.
+    meBridge = detectMEBridge()
 
     print("Loading config...")
     loadFromConfig()
